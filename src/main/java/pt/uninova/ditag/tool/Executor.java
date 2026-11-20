@@ -48,7 +48,7 @@ public class Executor
             !arguments.containsKey("consumerData") ||
             !arguments.containsKey("consumerType") ||
             !arguments.containsKey("outType")) {
-        		throw new IllegalArgumentException("MISSING <REQUIRED> ARGUMENTS: Executor --providerData=<data> --providerType=<file/raw> --consumerData=<data> --consumerType=<file/raw> --ontologyData=<data> --ontologyType=<file/raw> --outType=<full/simple> [--outDirectory=<directory>]");
+        		throw new IllegalArgumentException("MISSING <REQUIRED> ARGUMENTS: Executor --providerData=<data> --providerType=<file/raw> --consumerData=<data> --consumerType=<file/raw> --ontologyData=<data> --ontologyType=<file/raw> --outType=<full/simple> [--outDirectory=<directory>] [--timeOut=<seconds>]");
         }
         
         String providerData = arguments.get("providerData");
@@ -60,13 +60,22 @@ public class Executor
         String outType = arguments.get("outType");
         String outDirectory = arguments.get("outDirectory");
         String reasoner = arguments.getOrDefault("reasoner", "pellet");
+        int timeoutSeconds = 0;//0 (default) means no limit
+        try {
+            timeoutSeconds = Integer.parseInt(arguments.getOrDefault("timeOut", "0").trim());
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("INVALID ARGUMENT: --timeOut must be an integer number of seconds (e.g. --timeOut=30)");
+        }
+        if (timeoutSeconds < 0) {
+            throw new IllegalArgumentException("INVALID ARGUMENT: --timeOut must be an integer number of seconds greater than or equal to 0");
+        }
 
         int logLevel = 0;
         try {
             logLevel = Integer.parseInt(arguments.getOrDefault("logLevel", "0").toString());
         } catch (NumberFormatException e) {}
         
-        run(providerData,providerType,consumerData,consumerType,ontologyData,ontologyType,outType,outDirectory,logLevel,reasoner);
+        run(providerData,providerType,consumerData,consumerType,ontologyData,ontologyType,outType,outDirectory,logLevel,reasoner,timeoutSeconds);
         
         DTLogger.logger.info(String.format("Exit Code: %s", semanticEngine.report.getExitCode().getCode()));
     }
@@ -78,6 +87,22 @@ public class Executor
 			JSONObject outputJson,
 			int logLevel,
 			String reasoner
+			)
+    {
+		return generateTranslator(providerStream, consumerStream, ontologyStream, outputJson, logLevel, reasoner, 0);
+    }
+	
+	/**
+	 * @param timeoutSeconds time limit (in seconds) for the obligatory matching; 0 or less means no limit
+	 */
+	public static String generateTranslator(
+			InputStream providerStream, 
+			InputStream consumerStream, 
+			InputStream ontologyStream, 
+			JSONObject outputJson,
+			int logLevel,
+			String reasoner,
+			int timeoutSeconds
 			)
     {
 		DTLogger.setLevel(logLevel == 1 ? Level.INFO :
@@ -102,6 +127,7 @@ public class Executor
 		if (semanticEngine == null) {
 			semanticEngine = new SemanticEngine();
 		}
+		semanticEngine.setTimeoutSeconds(timeoutSeconds);
 		
         SchemaDocument providerDocument = new SchemaDocument(providerXSD);
         SchemaDocument consumerDocument = new SchemaDocument(consumerXSD);
@@ -154,7 +180,9 @@ public class Executor
 			        semanticEngine.setProviderClass(providerClass);
 					
 					semanticEngine.runEngine();
-					returnString = semanticEngine.translatorCreator.generate(); 
+					if (semanticEngine.getReport().getExitCode() != ExitCode.TIMEOUT) {
+						returnString = semanticEngine.translatorCreator.generate();
+					}
 	        	} catch (PelletNotAvailableException e) {
 	            	semanticEngine.getReport().setExitCode(ExitCode.PELLET_NOT_AVAILABLE);
 	        	} catch (Exception e) {
@@ -178,6 +206,25 @@ public class Executor
 		    String outDirectory,
 		    int logLevel,
 		    String reasoner)
+    {
+		return run(providerData, providerType, consumerData, consumerType, ontologyData, ontologyType, outType, outDirectory, logLevel, reasoner, 0);
+    }
+	
+	/**
+	 * @param timeoutSeconds time limit (in seconds) for the obligatory matching; 0 or less means no limit
+	 */
+	public static String run(
+		    String providerData,
+		    String providerType,
+		    String consumerData,
+		    String consumerType,
+		    String ontologyData,
+		    String ontologyType,
+		    String outType,
+		    String outDirectory,
+		    int logLevel,
+		    String reasoner,
+		    int timeoutSeconds)
     { 	
 		semanticEngine = new SemanticEngine();
 		
@@ -198,7 +245,7 @@ public class Executor
 		
 		String outTranslator = "";
 		if (semanticEngine.getReport().getExitCode() == ExitCode.SUCCESS || semanticEngine.getReport().getExitCode() == ExitCode.DEFAULT) {
-	        outTranslator = generateTranslator(providerXSD, consumerXSD, ontology, report, logLevel, reasoner);
+	        outTranslator = generateTranslator(providerXSD, consumerXSD, ontology, report, logLevel, reasoner, timeoutSeconds);
 		}
 		
 		switch (outType) {

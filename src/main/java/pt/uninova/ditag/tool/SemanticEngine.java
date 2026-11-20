@@ -7,8 +7,10 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 
 import pt.uninova.ditag.tool.report.Report;
+import pt.uninova.ditag.tool.report.Report.ExitCode;
 import pt.uninova.ditag.tool.schema.SchemaDocument;
 import pt.uninova.ditag.tool.schema.SchemaTree;
+import pt.uninova.ditag.tool.schema.SchemaTree.MatchingTimeoutException;
 import pt.uninova.ditag.tool.semantics.SemanticComparator;
 import pt.uninova.ditag.tool.translator.TranslatorCreator;
 
@@ -95,6 +97,15 @@ public class SemanticEngine {
 		this.report = report;
 	}
 	
+	// Time limit (in seconds) for the obligatory matching; 0 or less means no limit
+	public int timeoutSeconds = 0;
+	public int getTimeoutSeconds() {
+		return timeoutSeconds;
+	}
+	public void setTimeoutSeconds(int timeoutSeconds) {
+		this.timeoutSeconds = timeoutSeconds;
+	}
+	
 	public boolean firstMatch = true;
 	public boolean isFirstMatch() {
 		return firstMatch;
@@ -122,11 +133,17 @@ public class SemanticEngine {
 		this.report.setConsumerTree(this.consumerTree);
 		this.report.setProviderTree(this.providerTree);
 		
+		this.consumerTree.setTimeoutSeconds(this.timeoutSeconds);
+		
 		try {
 			Pair<List<Map<String, Object>>, List<Triple<String, String, Boolean>>> engineReturn = this.consumerTree.match(this.providerTree, true, this.firstMatch);
 			
 			this.report.setCombinations(engineReturn.getLeft());
 			this.report.setTryLog(engineReturn.getRight());
+		} catch (MatchingTimeoutException e) {
+			DTLogger.logger.info(e.getMessage());
+			this.report.setExitCode(ExitCode.TIMEOUT);
+			this.translationStatus = false;
 		} catch (Exception e) {
 			e.printStackTrace();
 			this.translationStatus = false;

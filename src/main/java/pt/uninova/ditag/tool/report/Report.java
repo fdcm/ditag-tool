@@ -32,8 +32,9 @@ public class Report {
 	    FILE_NOT_REACHABLE(4, "File Download Failed"),
 	    NO_MATCH(5, "No Match Found Between Consumer and Provider"),
 		IMPROPER_ARGUMENTS(6, "Argument Options Not Supported"),
-		INPUT_NOT_VALID(6, "Input Format Not Supported"),
 		PELLET_NOT_AVAILABLE(7, "Required Pellet/Jena classes are not available. Please uncomment imports and logic from Ontology and PelletSemanticReasoner classes, as well as the Pellet dependency declaration in the pom.xml file."),
+		INPUT_NOT_VALID(8, "Input Format Not Supported"),
+		TIMEOUT(9, "Obligatory Matching Exceeded the Time Limit"),
 		DEFAULT(-1, "Default Exit Code");
 		
 	    private final int code;

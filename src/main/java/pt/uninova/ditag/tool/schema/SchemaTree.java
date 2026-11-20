@@ -107,8 +107,36 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	            && (max == null || node.getMax() == null || node.getMax().equals(max));
 	}
 	
+	public static class MatchingTimeoutException extends Exception {
+		private static final long serialVersionUID = 1L;
+		public MatchingTimeoutException(int timeoutSeconds) {
+			super(String.format("Obligatory matching exceeded the time limit of %s seconds", timeoutSeconds));
+		}
+	}
+	private int timeoutSeconds = 0;
+	public int getTimeoutSeconds() {
+		return timeoutSeconds;
+	}
+	public void setTimeoutSeconds(int timeoutSeconds) {
+		this.timeoutSeconds = timeoutSeconds;
+	}
+	private long deadlineNanos = 0;
+	private void checkTimeout() throws MatchingTimeoutException {
+		if (this.deadlineNanos != 0 && System.nanoTime() - this.deadlineNanos > 0) {
+			throw new MatchingTimeoutException(this.timeoutSeconds);
+		}
+	}
 	@SuppressWarnings("unchecked")
 	public Pair<List<Map<String, Object>>, List<Triple<String, String, Boolean>>> match(SchemaTree otherSchemaTree, boolean returnCombinations, boolean returnFirst) throws Exception {
+		// the time limit starts counting at the beginning of the matching
+		this.deadlineNanos = 0;
+		if (this.timeoutSeconds > 0) {
+			this.deadlineNanos = System.nanoTime() + this.timeoutSeconds * 1_000_000_000L;
+			if (this.deadlineNanos == 0) {
+				this.deadlineNanos = 1;
+			}
+		}
+
 		Map<Integer, List<SchemaNode>> consumerNodesDict = new HashMap<>();
         Map<Integer, List<SchemaNode>> providerNodesDict = new HashMap<>();
 		
@@ -234,7 +262,7 @@ public class SchemaTree implements Iterable<SchemaNode> {
 			List<Pair<Integer, ArrayList<SchemaNode>>> consumerNodeListList,
 			List<Pair<Integer,Integer>> obligatoryGroupPairs,
 		    List<Map<String,Object>> annotationCombinations,
-		    List<Triple<String,String,Boolean>> tryLog) {
+		    List<Triple<String,String,Boolean>> tryLog) throws MatchingTimeoutException {
 		Integer providerGroupIndex = 0;
 	    Integer consumerGroupIndex = 0;
 	    boolean allObligatoryGroupsCompatible = false;
@@ -256,6 +284,7 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	    			DTLogger.logger.fine("checking if the groups are compatible");
 	    			while (!allAnnotationsCompatible && providerAnnotationIndex < providerNodeListList.get(providerGroupIndex).getRight().size()) { // or the consumer is constant-dependent
 	    				while (!allAnnotationsCompatible && providerAnnotationIndex < providerNodeListList.get(providerGroupIndex).getRight().size()) { // or the consumer is constant-dependent
+	    					this.checkTimeout();
 	    					SchemaNode consumerNode = consumerNodeListList.get(consumerGroupIndex).getRight().get(consumerAnnotationIndex);
 	    					
 	    					DTLogger.logger.fine("size "+consumerNodeListList.get(consumerGroupIndex).getRight().size());

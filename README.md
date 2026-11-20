@@ -41,6 +41,8 @@ REM       To use the Pellet reasoner, uncomment the corresponding dependency in 
 REM
 REM NOTE: --logLevel:
 REM       0 = off, 1 = info, 2 = debug
+REM
+REM NOTE: --timeOut (optional): time limit, in seconds, for the matching.
 
 java -jar ./ditag-tool.jar ^
 --providerData="./P1.xsd" ^
@@ -53,7 +55,8 @@ java -jar ./ditag-tool.jar ^
 --outDirectory=. ^
 --matchType=first ^
 --logLevel="0" ^
---reasoner="elk"
+--reasoner="elk" ^
+--timeOut="600"
 ```
 
 ### How to Run the Generated Translator
