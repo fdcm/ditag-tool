@@ -126,6 +126,23 @@ public class SchemaTree implements Iterable<SchemaNode> {
 			throw new MatchingTimeoutException(this.timeoutSeconds);
 		}
 	}
+	
+	// state of consumer nodes before they were paired with a virtual node (data type and match option), restored if that pair is undone
+	private final Map<SchemaNode, Pair<DataType, Integer>> stateBeforeVirtual = new HashMap<>();
+	
+	private void saveStateBeforeVirtual(SchemaNode consumerNode) {
+		stateBeforeVirtual.putIfAbsent(consumerNode, Pair.of(consumerNode.getDataType(), consumerNode.getMatchOptionIndex()));
+	}
+	
+	private void restoreIfVirtual(Pair<SchemaNode, SchemaNode> pair) {
+		if (pair.getRight().isVirtual()) {
+			Pair<DataType, Integer> state = stateBeforeVirtual.remove(pair.getLeft());
+			if (state != null) {
+				pair.getLeft().setDataType(state.getLeft());
+				pair.getLeft().setMatchOptionIndex(state.getRight());
+			}
+		}
+	}
 	@SuppressWarnings("unchecked")
 	public Pair<List<Map<String, Object>>, List<Triple<String, String, Boolean>>> match(SchemaTree otherSchemaTree, boolean returnCombinations, boolean returnFirst) throws Exception {
 		// the time limit starts counting at the beginning of the matching
@@ -160,16 +177,21 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	    	    .map(entry -> {
 	    	        List<SchemaNode> sortedNodes = entry.getValue().stream()
 	    	            .sorted(Comparator
-	    	            	.comparing(SchemaNode::getMin, Comparator.reverseOrder())
+	    	            	.comparing((SchemaNode n) -> n.getMin() == 0) // obligatory nodes first: matchObligatory stops at the first optional node
+	    	            	.thenComparing((SchemaNode n) -> canBeVirtual(n)) // nodes with a constant, value or default last (see canBeVirtual)
+	    	            	.thenComparing(SchemaNode::getMin, Comparator.reverseOrder())
 	    	            	.thenComparing((SchemaNode n) -> n.getDependsOn() != null)
 	    	                .thenComparing(SchemaNode::getMax, Comparator.reverseOrder())) 
 	    	            .collect(Collectors.toList());
 
 	    	        return Pair.of(entry.getKey(), new ArrayList<>(sortedNodes));
 	    	    })
-	    	    .sorted(Comparator.comparing(
-	    	        entry -> entry.getValue().stream().mapToInt(n -> n.getMin() + n.getMax()).sum(),
-	    	        Comparator.reverseOrder()))
+	    	    .sorted(Comparator
+	    	        // obligatory groups first: matchObligatory stops at the first optional group
+	    	        .comparing((Pair<Integer, ArrayList<SchemaNode>> entry) -> entry.getValue().get(0).getMin() == 0)
+	    	        // long avoids overflow with maxOccurs="unbounded" (Integer.MAX_VALUE)
+	    	        .thenComparing(entry -> entry.getValue().stream().mapToLong(n -> (long) n.getMin() + n.getMax()).sum(),
+	    	            Comparator.reverseOrder()))
 	    	    .collect(Collectors.toList());
 	    	    Iterator<SchemaNode> providerIterator = otherSchemaTree.iterator();
 	    DTLogger.logger.fine("consumerNodeListList: " + consumerNodeListList);
@@ -292,6 +314,7 @@ public class SchemaTree implements Iterable<SchemaNode> {
 							SchemaNode providerNode = null;
 	    					if (consumerNode.getConstantOption() != null) { // check if the option is constant: if dependent, check using optionIndex; otherwise, check the first option
 	    						DTLogger.logger.fine("DEPENDS_ON " + consumerNode.getName() + " " + consumerNode.getSchemaNodeOptions().get(consumerNode.getDependsOn().getMatchOptionIndex()).getValue());
+	    						saveStateBeforeVirtual(consumerNode);
 	    						providerNode = new SchemaNode();
 	    						providerNode.setName("virtual");
 	    						providerNode.addSchemaNodeOption(new SchemaNodeOption());
@@ -324,6 +347,7 @@ public class SchemaTree implements Iterable<SchemaNode> {
 		    							|| (providerAnnotationIndex+1 >= providerNodeListList.get(providerGroupIndex).getRight().size() &&
 	    								consumerNode.getSchemaNodeOptions().getLast().getDefaultExpression() != null))) { //constant or default
 	    					 		
+		    						saveStateBeforeVirtual(consumerNode);
 		    						providerNode = new SchemaNode();
 		    						providerNode.setName("virtual");
 		    						providerNode.addSchemaNodeOption(new SchemaNodeOption());
@@ -389,16 +413,18 @@ public class SchemaTree implements Iterable<SchemaNode> {
 
 						DTLogger.logger.fine("if it reached here, either (all annotations are compatible) OR (all provider annotations have been tested without success");    				
 	    				if (!allAnnotationsCompatible) {
-	    					if (consumerAnnotationIndex > 0 && !annotationPairs.getLast().getRight().isVirtual()) { // only removes pair if the provider is not virtual
-	    						DTLogger.logger.fine("remove one pair");
-	    						DTLogger.logger.fine("annotationPairs.size()="+annotationPairs.size());
-	    						DTLogger.logger.fine("indexOf="+providerNodeListList.get(providerGroupIndex).getRight().indexOf(annotationPairs.get(annotationPairs.size() - 1).getRight()));
-	    						providerAnnotationIndex = providerNodeListList.get(providerGroupIndex).getRight().indexOf(annotationPairs.get(annotationPairs.size() - 1).getRight()) + 1;
+	    					List<SchemaNode> providerNodes = providerNodeListList.get(providerGroupIndex).getRight();
+	    					// keep undoing while the undone pair has no remaining provider nodes to try
+	    					while (providerAnnotationIndex >= providerNodes.size() && !annotationPairs.isEmpty()) {
+	    						if (annotationPairs.getLast().getRight().isVirtual()) {
+	    							break; // virtual pairs are not undone (as before)
+	    						}
+	    						providerAnnotationIndex = providerNodes.indexOf(annotationPairs.getLast().getRight()) + 1;
 	    						annotationPairs.remove(annotationPairs.size() - 1);
 	    						consumerAnnotationIndex--;
-	    						DTLogger.logger.fine("given the previous group pairs, no match can be found for this annotation. Undo the previous pair and try to match the remaining ones");
+	    						DTLogger.logger.fine("given the previous pairs, no match can be found for this annotation. Undo the previous pair and try to match the remaining ones");
 	    					}
-	    					else {
+	    					if (providerAnnotationIndex >= providerNodes.size()) {
 	    						DTLogger.logger.fine("unable to find pairs for all required annotations");
 	    					}
 	    				}
@@ -412,19 +438,21 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	    	}
 			DTLogger.logger.fine("if it reached here, either all groups are compatible or all provider groups have been tested");    				
 	    	if (!allObligatoryGroupsCompatible) {
-	    		if (consumerGroupIndex > 0) {
+	    		// keep undoing while the undone consumer group has no remaining provider groups to try
+	    		while (providerGroupIndex >= providerNodeListList.size() && consumerGroupIndex > 0) {
+	    			final Integer lastProviderGroupId = obligatoryGroupPairs.remove(obligatoryGroupPairs.size() - 1).getRight();
 	    			providerGroupIndex = IntStream.range(0, providerNodeListList.size())
-	    				    .filter(i -> providerNodeListList.get(i).getLeft() == obligatoryGroupPairs.get(obligatoryGroupPairs.size() - 1).getRight())
-	    				    .findFirst()
-	    				    .orElse(-1) + 1;
-	    			obligatoryGroupPairs.remove(obligatoryGroupPairs.size() - 1);
-	    			consumerGroupIndex--;	    			
-	    			annotationCombinations.removeLast();
-	    			
-					DTLogger.logger.fine("given the previous group pairs, a match cannot be found for this group. Reverting the previous pair and trying to match the remaining ones");
+	    				.filter(i -> providerNodeListList.get(i).getLeft().equals(lastProviderGroupId))
+	    				.findFirst()
+	    				.orElse(-1) + 1;
+	    			consumerGroupIndex--;
+	    			Map<String,Object> removedCombination = annotationCombinations.removeLast();
+	    			// restore the consumer nodes that were paired with virtual nodes in the undone group pair
+	    			((List<Pair<SchemaNode,SchemaNode>>) removedCombination.get("obligatory-annotation-pairs")).forEach(this::restoreIfVirtual);
+	    			DTLogger.logger.fine("given the previous group pairs, a match cannot be found for this group. Reverting the previous pair and trying to match the remaining ones");
 	    		}
-	    		else {
-					DTLogger.logger.fine("unable to find pairs for all required groups");
+	    		if (providerGroupIndex >= providerNodeListList.size()) {
+	    			DTLogger.logger.fine("unable to find pairs for all required groups");
 	    		}
 	    	}
 	    }
@@ -527,7 +555,11 @@ public class SchemaTree implements Iterable<SchemaNode> {
 				}
 			}
 		    if (compatibleAnnotationFound) {
-		    	annotationCombinations.getFirst().put("optional-annotation-pairs", annotationPairs);
+		    	if (annotationCombinations.getFirst().containsKey("optional-annotation-pairs")) {
+		    		((List<Pair<SchemaNode,SchemaNode>>) annotationCombinations.getFirst().get("optional-annotation-pairs")).addAll(annotationPairs);
+		    	} else {
+		    		annotationCombinations.getFirst().put("optional-annotation-pairs", annotationPairs);
+		    	}
 		    }
     	}
     	
@@ -636,6 +668,16 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	    	}
     	}
 	    
+	}
+	
+	// true if the consumer node has a constant, value or default. Such a node is always paired:
+	// when it is not paired with a provider node, it is paired with a virtual node holding its constant, value or default.
+	// Hence it never causes backtracking, and placing it last means a virtual pair never has to be undone.
+	private static boolean canBeVirtual(SchemaNode node) {
+		SchemaNodeOption lastOption = node.getSchemaNodeOptions().getLast();
+		return node.getConstantOption() != null
+				|| lastOption.getValue() != null
+				|| lastOption.getDefaultExpression() != null;
 	}
 	
 	private boolean isItemCompatible(SchemaNode consumer, SchemaNode provider) {	
