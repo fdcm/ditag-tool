@@ -245,17 +245,20 @@ public class SchemaTree implements Iterable<SchemaNode> {
 	    
         tryLog.sort(Comparator.comparing(Triple::getLeft));
 
-        StringBuilder auxSB = new StringBuilder();
-        auxSB.append(String.format("%-30s%-30s%-10s%n", "Category", "Field", "Value"));
-        auxSB.append("-----------------------------------------------------------------\n");
-        for (Triple<String, String, Boolean> row : tryLog) {
-        	auxSB.append(String.format("%-30s%-30s%-10s%n",
-                row.getLeft(),
-                row.getMiddle(),
-                row.getRight()
-            ));
+        // the table of tries is only built in debug mode (--logLevel=2)
+        if (DTLogger.logger.isLoggable(java.util.logging.Level.FINE)) {
+	        StringBuilder auxSB = new StringBuilder();
+	        auxSB.append(String.format("%-30s%-30s%-10s%n", "Category", "Field", "Value"));
+	        auxSB.append("-----------------------------------------------------------------\n");
+	        for (Triple<String, String, Boolean> row : tryLog) {
+	        	auxSB.append(String.format("%-30s%-30s%-10s%n",
+	                row.getLeft(),
+	                row.getMiddle(),
+	                row.getRight()
+	            ));
+	        }
+	        DTLogger.logger.fine(auxSB.toString().substring(0, auxSB.length() - 2));
         }
-        DTLogger.logger.fine(auxSB.toString().substring(0, auxSB.length() - 2));
 
 	    if (allObligatoryGroupsCompatible && returnCombinations) {
 	    	for (Map<String, Object> combination : annotationCombinations) {

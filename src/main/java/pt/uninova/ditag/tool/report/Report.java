@@ -6,11 +6,13 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.logging.Level;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.json.JSONObject;
 
+import pt.uninova.ditag.tool.DTLogger;
 import pt.uninova.ditag.tool.node.SchemaNode;
 import pt.uninova.ditag.tool.node.SchemaNodeOption;
 import pt.uninova.ditag.tool.schema.SchemaTree;
@@ -163,7 +165,15 @@ public class Report {
 	public List<Map<String, String>> getTryLog() {
 		return tryLog;
 	}
+	private int numberOfTries = 0;
+	public int getNumberOfTries() {
+		return numberOfTries;
+	}
 	public void setTryLog(List<Triple <String, String, Boolean>> tryLog) {        
+		this.numberOfTries = tryLog.size();
+		if (!DTLogger.logger.isLoggable(Level.FINE)) {
+			return; // the list of tries is only kept in debug mode (--logLevel=2)
+		}
         for (Triple<String, String, Boolean> log : tryLog) {
         	//if (log.getRight()) 
         	{
@@ -189,8 +199,10 @@ public class Report {
 			report.put("match", this.getMatch());
 		}
 		
-		report.put("tryLog", this.getTryLog());
-		report.put("numberOfTries", this.getTryLog().size());
+		if (!this.getTryLog().isEmpty()) {
+			report.put("tryLog", this.getTryLog());
+		}
+		report.put("numberOfTries", this.getNumberOfTries());
 
 		return report;
 	}

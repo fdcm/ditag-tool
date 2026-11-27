@@ -40,7 +40,8 @@ REM       depending on the reasoner you want to use.
 REM       To use the Pellet reasoner, uncomment the corresponding dependency in the `pom.xml` file and the related code in the Java source files.
 REM
 REM NOTE: --logLevel:
-REM       0 = off, 1 = info, 2 = debug
+REM       0 = off, 1 = info (summary), 2 = debug (detailed trace;
+REM       the report also includes the list of attempted pairs)
 REM
 REM NOTE: --timeOut (optional): time limit, in seconds, for the matching.
 
